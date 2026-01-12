@@ -1,0 +1,44 @@
+
+# ==============================
+# Keil MDK-ARM / uVision outputs
+# Keep project sources & main project files (e.g. *.uvprojx)
+# ==============================
+
+# Build output folders
+Objects/
+Listings/
+DebugConfig/
+
+# Common output artifacts
+*.o
+*.obj
+*.d
+*.crf
+*.lst
+*.lnp
+*.map
+*.axf
+*.elf
+*.hex
+*.bin
+*.out
+
+# Logs / reports
+*.build_log.htm
+*.dep
+JLinkLog.txt
+
+# User-specific / temporary uVision files
+*.uvgui*
+*.uvoptx
+*.uvmpw
+*.uvtmp
+*.bak
+*.tmp
+
+# Some CMSIS-Pack generated/temporary state (safe to ignore)
+*.pack
+
+# Explicitly keep core uVision project file(s)
+!*.uvprojx
+
