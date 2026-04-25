@@ -1,15 +1,17 @@
 
 # ==============================
-# Keil MDK-ARM / uVision outputs
-# Keep project sources & main project files (e.g. *.uvprojx)
+# Keil MDK-ARM / uVision (STM32CubeMX)
 # ==============================
 
-# Build output folders
-Objects/
-Listings/
-DebugConfig/
+# Project-local build output folders
+EDispense/MDK-ARM/EDispense/
+EDispense/MDK-ARM/DebugConfig/
 
-# Common output artifacts
+# Generic build/listing folders (if generated elsewhere)
+**/Objects/
+**/Listings/
+
+# Compiler / linker artifacts
 *.o
 *.obj
 *.d
@@ -23,12 +25,13 @@ DebugConfig/
 *.bin
 *.out
 
-# Logs / reports
+# Build reports and logs
 *.build_log.htm
 *.dep
+*.log
 JLinkLog.txt
 
-# User-specific / temporary uVision files
+# uVision user-specific / temporary files
 *.uvgui*
 *.uvoptx
 *.uvmpw
@@ -36,9 +39,11 @@ JLinkLog.txt
 *.bak
 *.tmp
 
-# Some CMSIS-Pack generated/temporary state (safe to ignore)
+# CMSIS-Pack download/cache artifacts
 *.pack
 
-# Explicitly keep core uVision project file(s)
+# Keep project source/control files
 !*.uvprojx
+!*.uvproj
+!*.ioc
 
