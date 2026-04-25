@@ -54,14 +54,17 @@ Stepper stepper2 = {0};
 Stepper stepper3 = {0};
 Stepper stepper4 = {0};
 Stepper stepper5 = {0};
-uint8_t RxBuffer[50] = {0}; // 串口屏不定长数据缓冲区
+uint8_t screen_rx_buf[50] = {0}; // 串口屏不定长数据缓冲区
 extern DMA_HandleTypeDef hdma_usart1_rx; // DMA 句柄
+extern DMA_HandleTypeDef hdma_usart6_rx; // DMA 句柄
+uint8_t laser_rx_buf[50] = {0};
+uint32_t laser_dis = 0; // 激光测距测试距离
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+void Laser_Dis_Update(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -126,7 +129,10 @@ int main(void)
 	Init_Stepper(&stepper5,DIR5_GPIO_Port,DIR5_Pin,STP5_GPIO_Port,STP5_Pin,&htim10,TIM_CHANNEL_1,0.1125f);
 	
 	// 启动不定长数据接收
-	HAL_UARTEx_ReceiveToIdle_DMA(&huart1,RxBuffer,50);
+	HAL_UARTEx_ReceiveToIdle_DMA(&huart1,screen_rx_buf,50);
+	__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT); //关闭过半中断
+	// 激光测距接收
+	HAL_UARTEx_ReceiveToIdle_DMA(&huart6,laser_rx_buf,50);
 	__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT); //关闭过半中断
   /* USER CODE END 2 */
 
@@ -134,6 +140,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+		HAL_Delay(10);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -205,12 +212,28 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 
 // 不定长数据接收回调
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size){
-     if(huart == &huart1){
-			 // 串口屏数据包解码放在此处
-			 HAL_UART_Transmit(huart,RxBuffer,Size,HAL_MAX_DELAY);// 数据回显
-     }
-	HAL_UARTEx_ReceiveToIdle_DMA(huart, RxBuffer, 50); //再次打开接受
-	__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT); //关闭过半中断，
+	if(huart == &huart1){
+		// 串口屏数据包解码放在此处
+		HAL_UART_Transmit(huart,screen_rx_buf,Size,HAL_MAX_DELAY);// 数据回显
+		
+		HAL_UARTEx_ReceiveToIdle_DMA(huart, screen_rx_buf, 50); //再次打开接受
+		__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT); //关闭过半中断
+	} else if(huart == &huart6){
+		Laser_Dis_Update();
+		HAL_UARTEx_ReceiveToIdle_DMA(huart, laser_rx_buf, 50); //再次打开接受
+		__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT); //关闭过半中断
+	}
+}
+
+void Laser_Dis_Update(void){
+	if(laser_rx_buf[6] == 0x30 && laser_rx_buf[29] == 0x20){ // 接收成功 + 关键校验帧验证
+		uint8_t byte1 = laser_rx_buf[25] == 0x20 ? 0 : laser_rx_buf[25] - 0x30;
+		uint8_t byte2 = laser_rx_buf[26] == 0x20 ? 0 : laser_rx_buf[26] - 0x30;
+		uint8_t byte3 = laser_rx_buf[27] == 0x20 ? 0 : laser_rx_buf[27] - 0x30;
+		uint8_t byte4 = laser_rx_buf[28] == 0x20 ? 0 : laser_rx_buf[28] - 0x30;
+		laser_dis = byte1*1000 + byte2*100 + byte3*10 + byte4; // 古法解码，单位mm
+	}
+	else return;
 }
 
 /* USER CODE END 4 */
