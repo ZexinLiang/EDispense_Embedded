@@ -111,12 +111,28 @@ void delta_dis_transform(float delta_x, float delta_y, float* motor_delta_x, flo
 /**
  * @brief CoreXY 逆向运动学: 获取实际坐标位置
  */
+// ============================================================
+// 步进电机运动参数 (加速度 accel / 目标速度 tagv), 每电机独立可调
+// 传入 StpDistanceSetBlocking(stepper, distance, accel, tagv) 的后两参
+// ============================================================
+float g_x_accel = 800.0f;       // X轴(stepper1) 加速度
+float g_x_speed = 1600.0f;      // X轴(stepper1) 目标速度
+float g_y_accel = 800.0f;       // Y轴(stepper2) 加速度
+float g_y_speed = 1600.0f;      // Y轴(stepper2) 目标速度
+float g_z_accel = 500.0f;       // Z轴(stepper3) 加速度
+float g_z_speed = 500.0f;       // Z轴(stepper3) 目标速度
+float g_squeeze_accel = 800.0f; // 挤锡(stepper4) 加速度
+float g_squeeze_speed = 1200.0f;  // 挤锡(stepper4) 目标速度
+
+// 绝对零点校准偏移: 默认(0,0)→上电显示工作原点; 校准后标定当前位置为(-360,-360)
+float g_calib_off1 = 0.0f;
+float g_calib_off2 = 0.0f;
 void Get_Real_Position(float *real_x, float *real_y) {
     float m1_phys = -(stepper1.position_ctnow * stepper1.stepangle);
     float m2_phys = -(stepper2.position_ctnow * stepper2.stepangle);
 
-    float m1_rel = m1_phys - 0.0f;
-    float m2_rel = m2_phys - 500.0f;
+    float m1_rel = m1_phys - g_calib_off1;
+    float m2_rel = m2_phys - g_calib_off2;
 
     *real_x = (m1_rel + m2_rel) * one_div_sqrt_2;
     *real_y = (m2_rel - m1_rel) * one_div_sqrt_2;
@@ -141,8 +157,8 @@ void move_axis_to(float target_x, float target_y){
     float motor_move_x, motor_move_y;
     delta_dis_transform(delta_x, delta_y, &motor_move_x, &motor_move_y);
 
-    StpDistanceSetBlocking(&stepper1, motor_move_x, 450, 200);
-    StpDistanceSetBlocking(&stepper2, motor_move_y, 450, 200);
+    StpDistanceSetBlocking(&stepper1, motor_move_x, g_x_accel, g_x_speed);
+    StpDistanceSetBlocking(&stepper2, motor_move_y, g_y_accel, g_y_speed);
 }
 
 /**
@@ -203,7 +219,8 @@ void Move_Z_Axis_To_Height(float target_height_mm) {
 
         // 执行移动
         // 阻塞模式: 等待8mm或0.5mm移动完成后才返回
-        StpDistanceSetBlocking(&stepper3, move_step, speed, 400); 
+        // 注: 此处为激光闭环自适应定位, accel按误差动态变档(300~1200), 不使用全局g_z_accel
+        StpDistanceSetBlocking(&stepper3, move_step, speed, g_z_speed); 
         
         // 给激光传感器一点时间稳定,消除移动振动影响
         osDelay(10); 
@@ -217,7 +234,7 @@ void Move_Z_Axis_To_Height(float target_height_mm) {
  */
 void Retract_Z_Axis(void) {
     // 假设正值向上移动,上移10mm
-    StpDistanceSetBlocking(&stepper3, 10.0f, 400, 200); 
+    StpDistanceSetBlocking(&stepper3, 10.0f, g_z_accel, g_z_speed); 
 }
 
 /**
@@ -226,15 +243,14 @@ void Retract_Z_Axis(void) {
  */
 void Squeeze_Solder(uint16_t count) {
     // 单次挤压的微动距离
-    const float SQUEEZE_DISPENSE_AMOUNT_MM = 40.0f; // 根据实际调整
-    const float SQUEEZE_RETRACT_AMOUNT_MM = -20.0f; // 轻微回抽防止漏锡
+    const float SQUEEZE_DISPENSE_AMOUNT_MM = -150.0f; // 根据实际调整
+    const float SQUEEZE_RETRACT_AMOUNT_MM = 143.0f; // 轻微回抽防止漏锡
 
     for (uint16_t i = 0; i < count; i++) {
         // 假设正值挤出
-        StpDistanceSetBlocking(&stepper4, SQUEEZE_DISPENSE_AMOUNT_MM, 400, 50);
-        osDelay(20); // 短暂暂停
-        StpDistanceSetBlocking(&stepper4, SQUEEZE_RETRACT_AMOUNT_MM, 400, 50);
-        osDelay(50); // 两次挤压之间等待
+        StpDistanceSetBlocking(&stepper4, SQUEEZE_DISPENSE_AMOUNT_MM, g_squeeze_accel, g_squeeze_speed);
+        while(IFMOVING(stepper4.motor_state)) osDelay(20); // 短暂暂停;
+        StpDistanceSetBlocking(&stepper4, SQUEEZE_RETRACT_AMOUNT_MM, g_squeeze_accel, g_squeeze_speed);
     }
 }
 
@@ -512,6 +528,7 @@ void USB_Data_Process_Callback(uint8_t* Buf, uint32_t *Len){
     if(id==0x01)      need=4;
     else if(id==0x06) need=2;
     else if(id==0x07) need=1;
+    else if(id==0x08) need=6;
     else              need=0;                // 0x02/0x03
     if(n < (uint32_t)(3+need+1)) return;     // 帧长不足
     uint8_t* p = &Buf[3];                    // payload起始
@@ -550,6 +567,25 @@ void USB_Data_Process_Callback(uint8_t* Buf, uint32_t *Len){
             if(g_SystemState!=STATE_EMERGENCY_STOP){
                 g_UsbSqueezeCount=p[0];
                 g_UsbSqueezeFlag=1;
+            }
+            break;
+        case 0x08:  // XYZ联动移动: 一帧同时置XY+Z标志, 三轴并发启动(同0x03回零机制)
+            if(g_SystemState!=STATE_EMERGENCY_STOP){
+                int16_t ix=(int16_t)((p[0]<<8)|p[1]);
+                int16_t iy=(int16_t)((p[2]<<8)|p[3]);
+                TJC_TargetX=(float)ix/10.0f;
+                TJC_TargetY=(float)iy/10.0f;
+                TJC_MoveFlag=1;                          // XY (复用0x01路径)
+                g_UsbZSteps=(int16_t)((p[4]<<8)|p[5]);
+                g_UsbZMoveFlag=1;                        // Z步进 (复用0x06路径)
+            }
+            break;
+        case 0x09:  // 绝对零点校准: 将当前物理位置标定为(-254.56,-254.56)工作坐标
+            {        // off1=m1_phys, off2=m2_phys+360 → real_x=real_y=-360/√2=-254.56. 不移动电机
+                float m1_phys=-(stepper1.position_ctnow*stepper1.stepangle);
+                float m2_phys=-(stepper2.position_ctnow*stepper2.stepangle);
+                g_calib_off1=m1_phys;
+                g_calib_off2=m2_phys+360.0f;
             }
             break;
     }

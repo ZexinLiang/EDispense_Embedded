@@ -80,7 +80,11 @@ extern void Send_Log_To_Vofa(const char* msg);
 // USB CDC 调试通信 (定义在 main.c)
 extern void Send_USB_Status(int16_t x, int16_t y, int16_t z, int16_t laser, uint8_t state);
 extern void Send_USB_Done(uint8_t cmd_id);
+// 步进电机运动参数 (定义在 main.c)
+extern float g_z_accel;
+extern float g_z_speed;
 extern Stepper stepper3;
+extern Stepper stepper4;
 extern volatile uint32_t laser_dis;
 extern volatile uint8_t  g_UsbZMoveFlag;
 extern volatile int16_t  g_UsbZSteps;
@@ -187,7 +191,9 @@ void StartDefaultTask(void const * argument)
       float real_x, real_y;
       Get_Real_Position(&real_x, &real_y); 
       
-      uint8_t is_moving = IFMOVING(stepper1.motor_state) || IFMOVING(stepper2.motor_state);
+      // 运动状态: 需统计所有执行轴(XY + Z + 挤锡), 否则单动Z/挤锡时状态会误报为空闲
+      uint8_t is_moving = IFMOVING(stepper1.motor_state) || IFMOVING(stepper2.motor_state)
+                       || IFMOVING(stepper3.motor_state) || IFMOVING(stepper4.motor_state);
       
        // 1. 绘制路径轨迹 (安全的)
       TJC_ProcessUI(real_x, real_y, is_moving);
@@ -272,14 +278,14 @@ void StartTask02(void const * argument)
                 if (target_z < 0.0f)        target_z = 0.0f;
                 else if (target_z > 950.0f) target_z = 950.0f;
                 float actual = target_z - cur_z;
-                if (actual != 0.0f) StpDistanceSetBlocking(&stepper3, actual, 400, 200);
+                if (actual != 0.0f) StpDistanceSetBlocking(&stepper3, actual, g_z_accel, g_z_speed);
                 Send_USB_Done(0x06);
             }
             // USB调试: Z轴回零 (回到0°)
             else if (g_UsbZHomeFlag) {
                 g_UsbZHomeFlag = 0;
                 float back = stepper3.stepangle * stepper3.position_ctnow;  // 回到ctnow=0
-                if (back != 0.0f) StpDistanceSetBlocking(&stepper3, back, 400, 200);
+                if (back != 0.0f) StpDistanceSetBlocking(&stepper3, back, g_z_accel, g_z_speed);
                 Send_USB_Done(0x03);
             }
             // USB调试: 挤锡 (阻塞动作, 主任务执行)
